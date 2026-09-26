@@ -25,3 +25,6 @@ IMPORTANTE:
 - Esta versión guarda los datos localmente en el navegador/dispositivo.
 - No tiene todavía una base de datos en la nube.
 - WhatsApp automático se agregará en una etapa posterior.
+
+
+Versión v4: estado de reserva automático según seña. Seña $0 = Pendiente de seña; seña > $0 = Confirmada. El saldo se calcula automáticamente.

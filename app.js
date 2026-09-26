@@ -3,6 +3,23 @@ const defaults={settings:{price:40000,deposit:12000,courts:["Cancha 1","Cancha 2
 let db=JSON.parse(localStorage.getItem(KEY)||"null")||defaults,page="agenda",selectedDate=today();
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function today(){return new Date().toISOString().slice(0,10)}
+function computedStatus(r){
+  if(r.status==="Cancelada") return "Cancelada";
+  return (+r.deposit||0)>0 ? "Confirmada" : "Pendiente de seña";
+}
+function normalizeReservations(){
+  let changed=false;
+  db.reservations.forEach(r=>{
+    if(r.status!=="Cancelada"){
+      const nextStatus=computedStatus(r);
+      const nextBalance=Math.max(0,(+r.price||0)-(+r.deposit||0));
+      if(r.status!==nextStatus){r.status=nextStatus;changed=true}
+      if(+r.balance!==nextBalance){r.balance=nextBalance;changed=true}
+    }
+  });
+  if(changed) save();
+}
+normalizeReservations();
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function money(n){return "$"+Number(n||0).toLocaleString("es-AR")}
 function next(h){return String((+h.slice(0,2)+1)%24).padStart(2,"0")+":00"}
@@ -39,16 +56,21 @@ document.querySelector("#app").innerHTML=`<div class="card"><div class="row betw
 <div><label>Horario</label><select id="hour">${s.hours.map(v=>`<option ${v===(r?.hour||h)?"selected":""}>${v}–${next(v)}</option>`).join("")}</select></div>
 <div><label>Precio</label><input id="price" type="number" value="${r?.price??s.price}"></div>
 <div><label>Seña</label><input id="deposit" type="number" value="${r?.deposit??0}"></div>
-<div><label>Estado</label><select id="status"><option>Pendiente de seña</option><option>Confirmada</option></select></div>
-<div><label>Saldo</label><input id="balance" type="number" value="${r?.balance??s.price}"></div></div>
+<div><label>Estado automático</label><input id="statusDisplay" value="${computedStatus(r||{deposit:0})}" readonly></div>
+<div><label>Saldo</label><input id="balance" type="number" value="${Math.max(0,(+(r?.price??s.price)||0)-(+((r?.deposit)??0)||0))}" readonly></div></div>
 <div style="margin-top:10px"><label>Notas</label><textarea id="notes" rows="3">${esc(r?.notes||"")}</textarea></div>
 <div class="row" style="margin-top:12px"><button class="green" onclick="saveRes('${r?.id||""}')">Guardar</button><button class="secondary" onclick="go('agenda')">Cancelar</button></div></div>`;
-deposit.oninput=()=>balance.value=Math.max(0,(+price.value||0)-(+deposit.value||0))
+deposit.oninput=()=>{
+  const d=+deposit.value||0,p=+price.value||0;
+  balance.value=Math.max(0,p-d);
+  statusDisplay.value=d>0?"Confirmada":"Pendiente de seña";
+}
 }
 function newRes(c="",h=""){formRes(null,c,h)}
 function editRes(id){let r=db.reservations.find(x=>x.id===id);if(r)formRes(r)}
 function saveRes(id){
-let x={id:id||crypto.randomUUID(),client:client.value.trim(),phone:phone.value.trim(),date:date.value,court:court.value,hour:hour.value.slice(0,5),price:+price.value||0,deposit:+deposit.value||0,balance:+balance.value||0,status:status.value,notes:notes.value.trim(),createdAt:id?(db.reservations.find(r=>r.id===id)?.createdAt||Date.now()):Date.now()};
+let p=+price.value||0,d=Math.max(0,+deposit.value||0);
+let x={id:id||crypto.randomUUID(),client:client.value.trim(),phone:phone.value.trim(),date:date.value,court:court.value,hour:hour.value.slice(0,5),price:p,deposit:d,balance:Math.max(0,p-d),status:d>0?"Confirmada":"Pendiente de seña",notes:notes.value.trim(),createdAt:id?(db.reservations.find(r=>r.id===id)?.createdAt||Date.now()):Date.now()};
 if(!x.client||!x.date)return alert("Completá cliente y fecha.");
 let f=fixedFor(x.date,x.court,x.hour);let other=reservationFor(x.date,x.court,x.hour);if(f){alert(`Horario ocupado por la reserva fija de ${f.client}.`);return}if(other&&other.id!==x.id){alert(`Ese horario ya está ocupado por ${other.client}.`);return}
 let i=db.reservations.findIndex(r=>r.id===x.id);i>=0?db.reservations[i]=x:db.reservations.push(x);
