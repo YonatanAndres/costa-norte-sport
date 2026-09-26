@@ -27,4 +27,12 @@ IMPORTANTE:
 - WhatsApp automático se agregará en una etapa posterior.
 
 
-Versión v4: estado de reserva automático según seña. Seña $0 = Pendiente de seña; seña > $0 = Confirmada. El saldo se calcula automáticamente.
+Versión v5: estado de reserva automático según seña. Seña $0 = Pendiente de seña; seña > $0 = Confirmada. El saldo se calcula automáticamente.
+
+
+CORRECCIÓN v5:
+- El estado se recalcula automáticamente según la seña.
+- Seña $0 = Pendiente de seña.
+- Seña mayor a $0 = Confirmada.
+- El saldo se recalcula al modificar precio o seña.
+- Se actualizó la caché del Service Worker para evitar cargar la versión anterior.

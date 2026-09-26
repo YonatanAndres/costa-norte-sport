@@ -60,11 +60,14 @@ document.querySelector("#app").innerHTML=`<div class="card"><div class="row betw
 <div><label>Saldo</label><input id="balance" type="number" value="${Math.max(0,(+(r?.price??s.price)||0)-(+((r?.deposit)??0)||0))}" readonly></div></div>
 <div style="margin-top:10px"><label>Notas</label><textarea id="notes" rows="3">${esc(r?.notes||"")}</textarea></div>
 <div class="row" style="margin-top:12px"><button class="green" onclick="saveRes('${r?.id||""}')">Guardar</button><button class="secondary" onclick="go('agenda')">Cancelar</button></div></div>`;
-deposit.oninput=()=>{
-  const d=+deposit.value||0,p=+price.value||0;
+function updateResCalc(){
+  const d=Math.max(0,+deposit.value||0),p=Math.max(0,+price.value||0);
   balance.value=Math.max(0,p-d);
   statusDisplay.value=d>0?"Confirmada":"Pendiente de seña";
 }
+deposit.oninput=updateResCalc;
+price.oninput=updateResCalc;
+updateResCalc();
 }
 function newRes(c="",h=""){formRes(null,c,h)}
 function editRes(id){let r=db.reservations.find(x=>x.id===id);if(r)formRes(r)}
