@@ -1,111 +1,111 @@
 const KEY="costa_norte_sport_v3";
-const defaults={settings:{price:40000,deposit:12000,courts:["Cancha 1","Cancha 2"],hours:["18:00","19:00","20:00","21:00","22:00"]},reservations:[],fixed:[],clients:[]};
-let db=JSON.parse(localStorage.getItem(KEY)||"null")||defaults,page="agenda",selectedDate=today();
+const defaults={settings:{price:40000,deposit:12000,courts:["Cancha 1","Cancha 2"],hours:["18:00","19:00","20:00","21:00","22:00"]},reservations:[],fixed:[],clients:[],blocks:[]};
+let db=loadDB(),page="agenda",selectedDate=today(),clientSearch="";
+
+function loadDB(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    const x=raw?JSON.parse(raw):null;
+    const d=x&&typeof x==="object"?x:structuredClone(defaults);
+    d.settings=Object.assign({},defaults.settings,d.settings||{});
+    d.reservations=Array.isArray(d.reservations)?d.reservations:[];
+    d.fixed=Array.isArray(d.fixed)?d.fixed:[];
+    d.clients=Array.isArray(d.clients)?d.clients:[];
+    d.blocks=Array.isArray(d.blocks)?d.blocks:[];
+    normalizeDB(d);
+    return d;
+  }catch(e){return structuredClone(defaults)}
+}
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function today(){return new Date().toISOString().slice(0,10)}
-function computedStatus(r){
-  if(r.status==="Cancelada") return "Cancelada";
-  return (+r.deposit||0)>0 ? "Confirmada" : "Pendiente de seña";
-}
-function normalizeReservations(){
-  let changed=false;
-  db.reservations.forEach(r=>{
-    if(r.status!=="Cancelada"){
-      const nextStatus=computedStatus(r);
-      const nextBalance=Math.max(0,(+r.price||0)-(+r.deposit||0));
-      if(r.status!==nextStatus){r.status=nextStatus;changed=true}
-      if(+r.balance!==nextBalance){r.balance=nextBalance;changed=true}
-    }
-  });
-  if(changed) save();
-}
-normalizeReservations();
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function money(n){return "$"+Number(n||0).toLocaleString("es-AR")}
 function next(h){return String((+h.slice(0,2)+1)%24).padStart(2,"0")+":00"}
 function dow(date){return ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"][new Date(date+"T12:00:00").getDay()]}
-function nav(){let a=[["agenda","📅 Agenda"],["reservas","📋 Reservas"],["fijas","🔵 Reservas Fijas"],["clientes","👤 Clientes"],["historial","🕘 Historial"],["config","⚙️ Config."]];navEl().innerHTML=a.map(x=>`<button class="${page===x[0]?"active":""}" onclick="go('${x[0]}')">${x[1]}</button>`).join("")}
+function computedStatus(r){if(r.status==="Cancelada")return "Cancelada";return (+r.deposit||0)>0?"Confirmada":"Pendiente de seña"}
+function normalizeDB(d){
+  d.reservations.forEach(r=>{if(r.status!=="Cancelada"){r.deposit=Math.max(0,+r.deposit||0);r.price=Math.max(0,+r.price||0);r.balance=Math.max(0,r.price-r.deposit);r.status=computedStatus(r)}});
+  d.fixed.forEach(f=>{f.duration=Math.max(1,+f.duration||1);f.price=Math.max(0,+f.price||0);f.deposit=Math.max(0,+f.deposit||0);f.balance=Math.max(0,f.price-f.deposit);f.status=f.status||"Activa"});
+}
+normalizeDB(db);save();
 function navEl(){return document.querySelector("#nav")}
+function nav(){const a=[["agenda","📅 Agenda"],["reservas","📋 Reservas"],["fijas","🔵 Reservas Fijas"],["clientes","👤 Clientes"],["historial","🕘 Historial"],["config","⚙️ Config."]];navEl().innerHTML=a.map(x=>`<button class="${page===x[0]?"active":""}" onclick="go('${x[0]}')">${x[1]}</button>`).join("")}
 function go(p){page=p;render()}
-function render(){nav();({agenda, reservas, fijas, clientes, historial, config}[page])()}
-function fixedFor(date,court,hour){let day=dow(date);return db.fixed.find(f=>f.status==="Activa"&&f.day===day&&f.court===court&&f.hour===hour)}
+function render(){nav();({agenda,reservas,fijas,clientes,historial,config}[page]||agenda)()}
+function hourIndex(h){return db.settings.hours.indexOf(h)}
+function fixedFor(date,court,hour){
+  const idx=hourIndex(hour); return db.fixed.find(f=>f.status==="Activa"&&f.day===dow(date)&&f.court===court&&(()=>{const start=hourIndex(f.hour);return start>=0&&idx>=start&&idx<start+(+f.duration||1)})());
+}
+function blockFor(date,court,hour){return db.blocks.find(b=>b.date===date&&b.court===court&&b.hour===hour)}
 function reservationFor(date,court,hour){return db.reservations.find(r=>r.status!=="Cancelada"&&r.date===date&&r.court===court&&r.hour===hour)}
-function slotInfo(date,court,hour){
- let f=fixedFor(date,court,hour); if(f)return {type:"fixed",item:f};
- let r=reservationFor(date,court,hour); if(r)return {type:r.status==="Pendiente de seña"?"pending":"confirmed",item:r};
- return {type:"available",item:null}
-}
+function slotInfo(date,court,hour){let f=fixedFor(date,court,hour);if(f)return{type:"fixed",item:f};let b=blockFor(date,court,hour);if(b)return{type:"blocked",item:b};let r=reservationFor(date,court,hour);if(r)return{type:r.status==="Pendiente de seña"?"pending":"confirmed",item:r};return{type:"available",item:null}}
+function slotBadge(q,x){if(q.type==="available")return"🟢 Disponible";if(q.type==="fixed")return"🔵 Reserva fija";if(q.type==="blocked")return"⚫ Bloqueada";return x.status==="Pendiente de seña"?"🟡 Pendiente":"🔴 Confirmada"}
 function agenda(){
-let s=db.settings;
-document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><div><h2>Agenda</h2><small>Disponibilidad real · ${dow(selectedDate)}</small></div><button class="green" onclick="newRes()">+ Reserva</button></div>
-<div style="margin-top:10px"><label>Fecha</label><input type="date" value="${selectedDate}" onchange="selectedDate=this.value;render()"></div></div>
-${s.courts.map(c=>`<div class="card"><h3>${esc(c)}</h3>${s.hours.map(h=>{let q=slotInfo(selectedDate,c,h),x=q.item;
-return `<div class="slot ${q.type}"><div class="row between"><strong>${h}–${next(h)}</strong><span class="badge">${q.type==="available"?"🟢 Disponible":q.type==="fixed"?"🔵 Reserva fija":x.status==="Pendiente de seña"?"🟡 Pendiente":"🔴 Confirmada"}</span></div>
-${x?`<div style="margin-top:6px"><b>${esc(x.client)}</b> · ${esc(x.phone||"")}<br><small>${q.type==="fixed"?`Reserva semanal · ${money(x.price)}`:`${money(x.price)} · Seña ${money(x.deposit)} · Saldo ${money(x.balance)}`}</small></div>
-<div class="row" style="margin-top:8px">${q.type==="fixed"?`<button class="blue" onclick="go('fijas')">Ver reserva fija</button>`:`<button class="secondary" onclick="editRes('${x.id}')">Editar</button><button class="red" onclick="cancelRes('${x.id}')">Cancelar</button>`}</div>`:
-`<button class="green" style="margin-top:8px" onclick="newRes('${c}','${h}')">Reservar</button>`}</div>`}).join("")}</div>`).join("")}
-<div class="card"><b>Estados</b><div style="margin-top:7px">🟢 Disponible · 🟡 Pendiente de seña · 🔴 Confirmada · 🔵 Reserva fija</div></div>`;
+ const s=db.settings;
+ document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><div><h2>Agenda</h2><small>Disponibilidad real · ${dow(selectedDate)}</small></div><button class="green" onclick="newRes()">+ Reserva</button></div><div style="margin-top:10px"><label>Fecha</label><input type="date" value="${selectedDate}" onchange="selectedDate=this.value;render()"></div></div>
+ ${s.courts.map(c=>`<div class="card"><h3>${esc(c)}</h3>${s.hours.map(h=>{const q=slotInfo(selectedDate,c,h),x=q.item;return `<div class="slot ${q.type}"><div class="row between"><strong>${h}–${next(h)}</strong><span class="badge">${slotBadge(q,x)}</span></div>${x?`<div style="margin-top:6px"><b>${esc(x.client||x.reason||"Bloqueo")}</b>${x.phone?` · ${esc(x.phone)}`:""}<br><small>${q.type==="fixed"?`Reserva semanal · ${money(x.price)} · ${x.duration||1} h`:q.type==="blocked"?esc(x.reason||"Horario bloqueado"):`${money(x.price)} · Seña ${money(x.deposit)} · Saldo ${money(x.balance)}`}</small></div><div class="row" style="margin-top:8px">${q.type==="fixed"?`<button class="blue" onclick="go('fijas')">Ver reserva fija</button>`:q.type==="blocked"?`<button class="secondary" onclick="unblock('${x.id}')">Desbloquear</button>`:`<button class="secondary" onclick="editRes('${x.id}')">Editar</button><button class="red" onclick="cancelRes('${x.id}')">Cancelar</button>`}</div>`:`<div class="row" style="margin-top:8px"><button class="green" onclick="newRes('${c}','${h}')">Reservar</button><button class="secondary" onclick="blockSlot('${c}','${h}')">Bloquear</button></div>`}</div>`}).join("")}</div>`).join("")}
+ <div class="card"><b>Estados</b><div style="margin-top:7px">🟢 Disponible · 🟡 Pendiente de seña · 🔴 Confirmada · 🔵 Reserva fija · ⚫ Bloqueada</div></div>`;
 }
+function clientByName(name){return db.clients.find(c=>c.name.toLowerCase()===String(name||"").trim().toLowerCase())}
+function clientSuggestions(){return db.clients.map(c=>`<option value="${esc(c.name)}">${esc(c.phone||"")}</option>`).join("")}
+function syncClientPhone(){const c=clientByName(client.value);if(c&&c.phone)phone.value=c.phone}
+function updateResCalc(){const d=Math.max(0,+deposit.value||0),p=Math.max(0,+price.value||0);balance.value=Math.max(0,p-d);statusDisplay.value=d>0?"Confirmada":"Pendiente de seña"}
 function formRes(r=null,c="",h=""){
-let s=db.settings;
-document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>${r?"Editar reserva":"Nueva reserva"}</h2><button class="secondary" onclick="go('agenda')">Volver</button></div>
-<div class="grid">
-<div><label>Cliente</label><input id="client" value="${esc(r?.client||"")}"></div><div><label>Teléfono</label><input id="phone" value="${esc(r?.phone||"")}"></div>
-<div><label>Fecha</label><input id="date" type="date" value="${r?.date||selectedDate}"></div>
-<div><label>Cancha</label><select id="court">${s.courts.map(v=>`<option ${v===(r?.court||c)?"selected":""}>${esc(v)}</option>`).join("")}</select></div>
-<div><label>Horario</label><select id="hour">${s.hours.map(v=>`<option ${v===(r?.hour||h)?"selected":""}>${v}–${next(v)}</option>`).join("")}</select></div>
-<div><label>Precio</label><input id="price" type="number" value="${r?.price??s.price}"></div>
-<div><label>Seña</label><input id="deposit" type="number" value="${r?.deposit??0}"></div>
-<div><label>Estado automático</label><input id="statusDisplay" value="${computedStatus(r||{deposit:0})}" readonly></div>
-<div><label>Saldo</label><input id="balance" type="number" value="${Math.max(0,(+(r?.price??s.price)||0)-(+((r?.deposit)??0)||0))}" readonly></div></div>
-<div style="margin-top:10px"><label>Notas</label><textarea id="notes" rows="3">${esc(r?.notes||"")}</textarea></div>
-<div class="row" style="margin-top:12px"><button class="green" onclick="saveRes('${r?.id||""}')">Guardar</button><button class="secondary" onclick="go('agenda')">Cancelar</button></div></div>`;
-function updateResCalc(){
-  const d=Math.max(0,+deposit.value||0),p=Math.max(0,+price.value||0);
-  balance.value=Math.max(0,p-d);
-  statusDisplay.value=d>0?"Confirmada":"Pendiente de seña";
-}
-deposit.oninput=updateResCalc;
-price.oninput=updateResCalc;
-updateResCalc();
+ const s=db.settings;
+ document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>${r?"Editar reserva":"Nueva reserva"}</h2><button class="secondary" onclick="go('agenda')">Volver</button></div><div class="grid"><div><label>Cliente</label><input id="client" list="clientList" autocomplete="off" value="${esc(r?.client||"")}" placeholder="Nombre y apellido"><datalist id="clientList">${clientSuggestions()}</datalist></div><div><label>Teléfono</label><input id="phone" value="${esc(r?.phone||"")}" inputmode="tel"></div><div><label>Fecha</label><input id="date" type="date" value="${r?.date||selectedDate}"></div><div><label>Cancha</label><select id="court">${s.courts.map(v=>`<option ${v===(r?.court||c)?"selected":""}>${esc(v)}</option>`).join("")}</select></div><div><label>Horario</label><select id="hour">${s.hours.map(v=>`<option ${v===(r?.hour||h)?"selected":""}>${v}–${next(v)}</option>`).join("")}</select></div><div><label>Precio</label><input id="price" type="number" min="0" value="${r?.price??s.price}"></div><div><label>Seña</label><input id="deposit" type="number" min="0" value="${r?.deposit??0}"></div><div><label>Estado automático</label><input id="statusDisplay" value="${computedStatus(r||{deposit:0})}" readonly></div><div><label>Saldo</label><input id="balance" type="number" value="${Math.max(0,(+(r?.price??s.price)||0)-(+((r?.deposit)??0)||0))}" readonly></div></div><div style="margin-top:10px"><label>Notas</label><textarea id="notes" rows="3">${esc(r?.notes||"")}</textarea></div><div class="row" style="margin-top:12px"><button class="green" onclick="saveRes('${r?.id||""}')">Guardar</button><button class="secondary" onclick="go('agenda')">Cancelar</button></div></div>`;
+ client.addEventListener("input",syncClientPhone);client.addEventListener("change",syncClientPhone);deposit.addEventListener("input",updateResCalc);price.addEventListener("input",updateResCalc);updateResCalc();syncClientPhone();
 }
 function newRes(c="",h=""){formRes(null,c,h)}
-function editRes(id){let r=db.reservations.find(x=>x.id===id);if(r)formRes(r)}
+function editRes(id){const r=db.reservations.find(x=>x.id===id);if(r)formRes(r)}
 function saveRes(id){
-let p=+price.value||0,d=Math.max(0,+deposit.value||0);
-let x={id:id||crypto.randomUUID(),client:client.value.trim(),phone:phone.value.trim(),date:date.value,court:court.value,hour:hour.value.slice(0,5),price:p,deposit:d,balance:Math.max(0,p-d),status:d>0?"Confirmada":"Pendiente de seña",notes:notes.value.trim(),createdAt:id?(db.reservations.find(r=>r.id===id)?.createdAt||Date.now()):Date.now()};
-if(!x.client||!x.date)return alert("Completá cliente y fecha.");
-let f=fixedFor(x.date,x.court,x.hour);let other=reservationFor(x.date,x.court,x.hour);if(f){alert(`Horario ocupado por la reserva fija de ${f.client}.`);return}if(other&&other.id!==x.id){alert(`Ese horario ya está ocupado por ${other.client}.`);return}
-let i=db.reservations.findIndex(r=>r.id===x.id);i>=0?db.reservations[i]=x:db.reservations.push(x);
-let c=db.clients.find(c=>c.name.toLowerCase()===x.client.toLowerCase());if(!c)db.clients.push({id:crypto.randomUUID(),name:x.client,phone:x.phone});else if(x.phone)c.phone=x.phone;
-save();selectedDate=x.date;go("agenda")
+ const p=Math.max(0,+price.value||0),d=Math.max(0,+deposit.value||0),x={id:id||crypto.randomUUID(),client:client.value.trim(),phone:phone.value.trim(),date:date.value,court:court.value,hour:hour.value.slice(0,5),price:p,deposit:d,balance:Math.max(0,p-d),status:d>0?"Confirmada":"Pendiente de seña",notes:notes.value.trim(),createdAt:id?(db.reservations.find(r=>r.id===id)?.createdAt||Date.now()):Date.now()};
+ if(!x.client||!x.date)return alert("Completá cliente y fecha.");
+ const f=fixedFor(x.date,x.court,x.hour);if(f)return alert(`Horario ocupado por la reserva fija de ${f.client}.`);
+ const b=blockFor(x.date,x.court,x.hour);if(b)return alert(`Horario bloqueado: ${b.reason||"sin motivo"}.`);
+ const other=reservationFor(x.date,x.court,x.hour);
+ if(other&&other.id!==x.id){
+   if(other.status==="Pendiente de seña"&&x.status==="Confirmada"){
+     if(!confirm(`El horario está pendiente de seña por ${other.client}. ¿Querés reemplazar esa reserva pendiente por la nueva reserva confirmada de ${x.client}?`))return;
+     other.status="Cancelada";other.cancelledAt=Date.now();other.cancelReason="Reemplazada por reserva confirmada";
+   }else{return alert(`Ese horario ya está ocupado por ${other.client}.`)}
+ }
+ const i=db.reservations.findIndex(r=>r.id===x.id);if(i>=0)db.reservations[i]=x;else db.reservations.push(x);
+ let c0=clientByName(x.client);if(!c0)db.clients.push({id:crypto.randomUUID(),name:x.client,phone:x.phone});else if(x.phone)c0.phone=x.phone;
+ save();selectedDate=x.date;go("agenda");
 }
-function cancelRes(id){let r=db.reservations.find(x=>x.id===id);if(r&&confirm(`¿Cancelar la reserva de ${r.client}?`)){r.status="Cancelada";r.cancelledAt=Date.now();save();render()}}
-function reservas(){let a=db.reservations.filter(r=>r.status!=="Cancelada").sort((x,y)=>(x.date+x.hour).localeCompare(y.date+y.hour));document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>Reservas</h2><button class="green" onclick="newRes()">+ Nueva</button></div>${a.length?`<table><tr><th>Fecha</th><th>Hora</th><th>Cancha</th><th>Cliente</th><th>Estado</th></tr>${a.map(r=>`<tr><td>${r.date}</td><td>${r.hour}</td><td>${esc(r.court)}</td><td>${esc(r.client)}</td><td>${r.status}</td></tr>`).join("")}</table>`:`<div class="empty">No hay reservas.</div>`}</div>`}
-function fijas(){let a=db.fixed;document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><div><h2>Reservas Fijas</h2><small>Se repiten automáticamente cada semana.</small></div><button class="green" onclick="newFixed()">+ Reserva fija</button></div>${a.length?`<table><tr><th>Cliente</th><th>Día</th><th>Hora</th><th>Cancha</th><th>Precio</th><th>Estado</th><th></th></tr>${a.map(f=>`<tr><td>${esc(f.client)}</td><td>${f.day}</td><td>${f.hour}</td><td>${esc(f.court)}</td><td>${money(f.price)}</td><td>${f.status}</td><td><button class="secondary" onclick="editFixed('${f.id}')">Editar</button></td></tr>`).join("")}</table>`:`<div class="empty">Todavía no hay reservas fijas.</div>`}</div>`}
-function fixedForm(f=null){
-let s=db.settings,days=["lunes","martes","miércoles","jueves","viernes","sábado","domingo"];
-document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>${f?"Editar reserva fija":"Nueva reserva fija"}</h2><button class="secondary" onclick="go('fijas')">Volver</button></div>
-<div class="grid"><div><label>Cliente</label><input id="fc" value="${esc(f?.client||"")}"></div><div><label>Teléfono</label><input id="fp" value="${esc(f?.phone||"")}"></div>
-<div><label>Día</label><select id="fd">${days.map(d=>`<option ${d===(f?.day||"lunes")?"selected":""}>${d}</option>`).join("")}</select></div>
-<div><label>Cancha</label><select id="ff">${s.courts.map(c=>`<option ${c===(f?.court||s.courts[0])?"selected":""}>${esc(c)}</option>`).join("")}</select></div>
-<div><label>Horario</label><select id="fh">${s.hours.map(h=>`<option ${h===(f?.hour||s.hours[0])?"selected":""}>${h}–${next(h)}</option>`).join("")}</select></div>
-<div><label>Precio semanal</label><input id="fprice" type="number" value="${f?.price??s.price}"></div>
-<div><label>Seña</label><input id="fdep" type="number" value="${f?.deposit??s.deposit}"></div>
-<div><label>Estado</label><select id="fst"><option ${f?.status!=="Pausada"?"selected":""}>Activa</option><option ${f?.status==="Pausada"?"selected":""}>Pausada</option><option ${f?.status==="Cancelada"?"selected":""}>Cancelada</option></select></div></div>
-<div style="margin-top:10px"><label>Notas</label><textarea id="fn" rows="3">${esc(f?.notes||"")}</textarea></div>
-<div class="row" style="margin-top:12px"><button class="green" onclick="saveFixed('${f?.id||""}')">Guardar</button><button class="secondary" onclick="go('fijas')">Cancelar</button></div></div>`
+function cancelRes(id){const r=db.reservations.find(x=>x.id===id);if(r&&confirm(`¿Cancelar la reserva de ${r.client}?`)){r.status="Cancelada";r.cancelledAt=Date.now();save();render()}}
+function blockSlot(c,h){const reason=prompt(`Motivo para bloquear ${c} ${h}–${next(h)}:`);if(reason===null)return;db.blocks.push({id:crypto.randomUUID(),date:selectedDate,court:c,hour:h,reason:reason.trim()||"Horario bloqueado",createdAt:Date.now()});save();render()}
+function unblock(id){db.blocks=db.blocks.filter(b=>b.id!==id);save();render()}
+function reservas(){const a=[...db.reservations].sort((x,y)=>(x.date+x.hour).localeCompare(y.date+y.hour));document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>Reservas</h2><button class="green" onclick="newRes()">+ Nueva</button></div>${a.length?`<table><tr><th>Fecha</th><th>Hora</th><th>Cancha</th><th>Cliente</th><th>Estado</th><th>Seña</th></tr>${a.map(r=>`<tr><td>${r.date}</td><td>${r.hour}</td><td>${esc(r.court)}</td><td>${esc(r.client)}</td><td>${esc(r.status)}</td><td>${money(r.deposit)}</td></tr>`).join("")}</table>`:`<div class="empty">No hay reservas.</div>`}</div>`}
+function fijas(){const a=db.fixed;document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><div><h2>Reservas Fijas</h2><small>Se repiten automáticamente cada semana.</small></div><button class="green" onclick="newFixed()">+ Reserva fija</button></div>${a.length?`<table><tr><th>Cliente</th><th>Día</th><th>Hora</th><th>Cancha</th><th>Duración</th><th>Precio</th><th>Estado</th><th></th></tr>${a.map(f=>`<tr><td>${esc(f.client)}</td><td>${f.day}</td><td>${f.hour}</td><td>${esc(f.court)}</td><td>${f.duration||1} h</td><td>${money(f.price)}</td><td>${esc(f.status)}</td><td><button class="secondary" onclick="editFixed('${f.id}')">Editar</button></td></tr>`).join("")}</table>`:`<div class="empty">Todavía no hay reservas fijas.</div>`}</div>`}
+function fixedForm(f=null,presetName="",presetPhone=""){
+ const s=db.settings,days=["lunes","martes","miércoles","jueves","viernes","sábado","domingo"];
+ document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>${f?"Editar reserva fija":"Nueva reserva fija"}</h2><button class="secondary" onclick="go('fijas')">Volver</button></div><div class="grid"><div><label>Cliente</label><input id="fc" list="fixedClientList" value="${esc(f?.client||presetName||"")}"><datalist id="fixedClientList">${clientSuggestions()}</datalist></div><div><label>Teléfono</label><input id="fp" value="${esc(f?.phone||presetPhone||"")}"></div><div><label>Día</label><select id="fd">${days.map(d=>`<option ${d===(f?.day||"lunes")?"selected":""}>${d}</option>`).join("")}</select></div><div><label>Cancha</label><select id="ff">${s.courts.map(c=>`<option ${c===(f?.court||s.courts[0])?"selected":""}>${esc(c)}</option>`).join("")}</select></div><div><label>Horario inicial</label><select id="fh">${s.hours.map(h=>`<option ${h===(f?.hour||s.hours[0])?"selected":""}>${h}–${next(h)}</option>`).join("")}</select></div><div><label>Duración</label><select id="fdur"><option value="1" ${(+f?.duration||1)===1?"selected":""}>1 hora</option><option value="2" ${(+f?.duration||1)===2?"selected":""}>2 horas</option><option value="3" ${(+f?.duration||1)===3?"selected":""}>3 horas</option></select></div><div><label>Precio</label><input id="fprice" type="number" min="0" value="${f?.price??s.price}"></div><div><label>Seña / pago</label><input id="fdep" type="number" min="0" value="${f?.deposit??s.deposit}"></div><div><label>Jugadores (opcional)</label><input id="fplayers" type="number" min="0" value="${f?.players??""}"></div><div><label>Estado</label><select id="fst"><option ${f?.status!=="Pausada"&&f?.status!=="Cancelada"?"selected":""}>Activa</option><option ${f?.status==="Pausada"?"selected":""}>Pausada</option><option ${f?.status==="Cancelada"?"selected":""}>Cancelada</option></select></div></div><div style="margin-top:10px"><label>Notas</label><textarea id="fn" rows="3">${esc(f?.notes||"")}</textarea></div><div class="row" style="margin-top:12px"><button class="green" onclick="saveFixed('${f?.id||""}')">Guardar</button><button class="secondary" onclick="go('fijas')">Cancelar</button></div></div>`;
 }
 function newFixed(){fixedForm()}
-function editFixed(id){let f=db.fixed.find(x=>x.id===id);if(f)fixedForm(f)}
+function editFixed(id){const f=db.fixed.find(x=>x.id===id);if(f)fixedForm(f)}
 function saveFixed(id){
-let x={id:id||crypto.randomUUID(),client:fc.value.trim(),phone:fp.value.trim(),day:fd.value,court:ff.value,hour:fh.value.slice(0,5),price:+fprice.value||0,deposit:+fdep.value||0,balance:(+fprice.value||0)-(+fdep.value||0),status:fst.value,notes:fn.value.trim(),createdAt:id?(db.fixed.find(f=>f.id===id)?.createdAt||Date.now()):Date.now()};
-if(!x.client)return alert("Completá el cliente.");
-let clash=db.fixed.find(f=>f.id!==x.id&&f.status==="Activa"&&f.day===x.day&&f.court===x.court&&f.hour===x.hour);if(clash)return alert(`Ya existe una reserva fija para ese día, cancha y horario: ${clash.client}.`);
-db.fixed=db.fixed.filter(f=>f.id!==x.id);db.fixed.push(x);let c=db.clients.find(c=>c.name.toLowerCase()===x.client.toLowerCase());if(!c)db.clients.push({id:crypto.randomUUID(),name:x.client,phone:x.phone});else if(x.phone)c.phone=x.phone;save();go("fijas")
+ const duration=Math.max(1,+fdur.value||1),start=hourIndex(fh.value.slice(0,5));
+ if(start<0||start+duration>db.settings.hours.length)return alert("La duración supera los horarios disponibles.");
+ const x={id:id||crypto.randomUUID(),client:fc.value.trim(),phone:fp.value.trim(),day:fd.value,court:ff.value,hour:fh.value.slice(0,5),duration,price:Math.max(0,+fprice.value||0),deposit:Math.max(0,+fdep.value||0),balance:Math.max(0,(+fprice.value||0)-Math.max(0,+fdep.value||0)),players:Math.max(0,+fplayers.value||0)||null,status:fst.value,notes:fn.value.trim(),createdAt:id?(db.fixed.find(f=>f.id===id)?.createdAt||Date.now()):Date.now()};
+ if(!x.client)return alert("Completá el cliente.");
+ const clash=db.fixed.find(f=>f.id!==x.id&&f.status==="Activa"&&f.day===x.day&&f.court===x.court&&fixedRangesOverlap(f,x));if(clash)return alert(`Ya existe una reserva fija que ocupa ese horario: ${clash.client}.`);
+ db.fixed=db.fixed.filter(f=>f.id!==x.id);db.fixed.push(x);let c=clientByName(x.client);if(!c)db.clients.push({id:crypto.randomUUID(),name:x.client,phone:x.phone});else if(x.phone)c.phone=x.phone;save();go("fijas")
 }
-function clientes(){document.querySelector("#app").innerHTML=`<div class="card"><h2>Clientes</h2>${db.clients.length?`<table><tr><th>Nombre</th><th>Teléfono</th><th>Reservas</th></tr>${db.clients.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${db.reservations.filter(r=>r.client===c.name&&r.status!=="Cancelada").length}</td></tr>`).join("")}</table>`:`<div class="empty">Los clientes se crean al guardar una reserva.</div>`}</div>`}
-function historial(){let a=[...db.reservations].sort((x,y)=>y.createdAt-x.createdAt);document.querySelector("#app").innerHTML=`<div class="card"><h2>Historial</h2>${a.length?`<table><tr><th>Fecha</th><th>Cliente</th><th>Cancha</th><th>Estado</th><th>Importe</th></tr>${a.map(r=>`<tr><td>${r.date} ${r.hour}</td><td>${esc(r.client)}</td><td>${esc(r.court)}</td><td>${r.status}</td><td>${money(r.price)}</td></tr>`).join("")}</table>`:`<div class="empty">Sin movimientos.</div>`}</div>`}
-function config(){let s=db.settings;document.querySelector("#app").innerHTML=`<div class="card"><h2>Configuración</h2><div class="grid"><div><label>Precio general</label><input id="cp" type="number" value="${s.price}"></div><div><label>Seña sugerida</label><input id="cd" type="number" value="${s.deposit}"></div></div><div style="margin-top:10px"><label>Canchas (una por línea)</label><textarea id="cc" rows="3">${s.courts.join("\n")}</textarea></div><div style="margin-top:10px"><label>Horarios (uno por línea)</label><textarea id="ch" rows="6">${s.hours.join("\n")}</textarea></div><button class="green" style="margin-top:10px" onclick="saveCfg()">Guardar</button></div><div class="card"><b>Privacidad</b><p>Los datos de esta versión se guardan localmente en el navegador de este dispositivo.</p></div>`}
-function saveCfg(){db.settings.price=+cp.value||0;db.settings.deposit=+cd.value||0;db.settings.courts=cc.value.split("\n").map(x=>x.trim()).filter(Boolean);db.settings.hours=ch.value.split("\n").map(x=>x.trim()).filter(Boolean);save();alert("Configuración guardada.");render()}
+function fixedRangesOverlap(a,b){const as=hourIndex(a.hour),bs=hourIndex(b.hour);return as<bs+(+b.duration||1)&&bs<as+(+a.duration||1)}
+function clientes(){
+ const q=clientSearch.trim().toLowerCase(),list=db.clients.filter(c=>!q||c.name.toLowerCase().includes(q)||String(c.phone||"").toLowerCase().includes(q));
+ const rows=list.map(c=>{const rs=db.reservations.filter(r=>r.client===c.name&&r.status!=="Cancelada"),fixed=db.fixed.filter(f=>f.client===c.name&&f.status!=="Cancelada"),paid=rs.reduce((sum,r)=>sum+(+r.deposit||0),0)+fixed.reduce((sum,f)=>sum+(+f.deposit||0),0);return `<div class="card" style="margin:0 0 9px;cursor:pointer" onclick="clientDetail('${c.id}')"><div class="row between"><div><b>${esc(c.name)}</b><br><small>${esc(c.phone||"Sin teléfono")}</small></div><span class="badge">${rs.length} reserva${rs.length===1?"":"s"}</span></div><div style="margin-top:6px;font-size:12px;color:#6b7280">Señas registradas: <b>${money(paid)}</b> · Fijas: ${fixed.length}</div></div>`}).join("");
+ document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><div><h2>Clientes</h2><small>Clientes guardados y reutilizables en nuevas reservas.</small></div><button class="green" onclick="newClient()">+ Nuevo cliente</button></div><div style="margin-top:10px"><input id="clientSearch" placeholder="Buscar por nombre o teléfono" value="${esc(clientSearch)}" oninput="clientSearch=this.value;clientes()"></div></div>${rows||`<div class="card empty">${db.clients.length?"No se encontraron clientes.":"Todavía no hay clientes guardados."}</div>`}`;
+}
+function newClient(){document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><h2>Nuevo cliente</h2><button class="secondary" onclick="go('clientes')">Volver</button></div><label>Nombre y apellido</label><input id="newClientName" placeholder="Ej.: Juan Pérez"><label>Teléfono</label><input id="newClientPhone" placeholder="3755..." inputmode="tel"><div class="row" style="margin-top:12px"><button class="green" onclick="saveClient()">Guardar cliente</button><button class="secondary" onclick="go('clientes')">Cancelar</button></div></div>`}
+function saveClient(){const name=newClientName.value.trim(),phone=newClientPhone.value.trim();if(!name)return alert("Completá el nombre del cliente.");const existing=clientByName(name);if(existing){if(phone)existing.phone=phone;save();alert("El cliente ya existía. Se actualizó su teléfono.");go("clientes");return}db.clients.push({id:crypto.randomUUID(),name,phone});save();go("clientes")}
+function clientDetail(id){const c=db.clients.find(x=>x.id===id);if(!c)return go("clientes");const rs=db.reservations.filter(r=>r.client===c.name).sort((a,b)=>(b.date+b.hour).localeCompare(a.date+a.hour)),fixed=db.fixed.filter(f=>f.client===c.name),paid=rs.filter(r=>r.status!=="Cancelada").reduce((sum,r)=>sum+(+r.deposit||0),0)+fixed.filter(f=>f.status!=="Cancelada").reduce((sum,f)=>sum+(+f.deposit||0),0);document.querySelector("#app").innerHTML=`<div class="card"><div class="row between"><div><h2>${esc(c.name)}</h2><small>${esc(c.phone||"Sin teléfono")}</small></div><button class="secondary" onclick="go('clientes')">Volver</button></div><div class="grid" style="margin-top:12px"><div class="card" style="margin:0"><small>Reservas</small><br><b>${rs.filter(r=>r.status!=="Cancelada").length}</b></div><div class="card" style="margin:0"><small>Señas registradas</small><br><b>${money(paid)}</b></div></div><div class="row" style="margin-top:12px"><button class="green" onclick="newResForClient('${c.id}')">+ Nueva reserva</button><button class="blue" onclick="newFixedForClient('${c.id}')">+ Reserva fija</button></div></div><div class="card"><h3>Historial del cliente</h3>${rs.length?`<table><tr><th>Fecha</th><th>Hora</th><th>Cancha</th><th>Estado</th><th>Seña</th></tr>${rs.map(r=>`<tr><td>${r.date}</td><td>${r.hour}</td><td>${esc(r.court)}</td><td>${esc(r.status)}</td><td>${money(r.deposit)}</td></tr>`).join("")}</table>`:`<div class="empty">Sin reservas registradas.</div>`}</div><div class="card"><h3>Reservas fijas</h3>${fixed.length?`<table><tr><th>Día</th><th>Hora</th><th>Cancha</th><th>Duración</th><th>Estado</th></tr>${fixed.map(f=>`<tr><td>${f.day}</td><td>${f.hour}</td><td>${esc(f.court)}</td><td>${f.duration||1} h</td><td>${esc(f.status)}</td></tr>`).join("")}</table>`:`<div class="empty">No tiene reservas fijas.</div>`}</div>`}
+function newResForClient(id){const c=db.clients.find(x=>x.id===id);if(!c)return;formRes();client.value=c.name;phone.value=c.phone||"";syncClientPhone()}
+function newFixedForClient(id){const c=db.clients.find(x=>x.id===id);if(!c)return;fixedForm(null,c.name,c.phone||"")}
+function historial(){const a=[...db.reservations].sort((x,y)=>(y.createdAt||0)-(x.createdAt||0));const cancelled=a.filter(r=>r.status==="Cancelada").length;document.querySelector("#app").innerHTML=`<div class="card"><h2>Historial</h2><small>${a.length} reservas registradas · ${cancelled} canceladas</small>${a.length?`<table><tr><th>Fecha</th><th>Cliente</th><th>Cancha</th><th>Estado</th><th>Importe</th><th>Seña</th></tr>${a.map(r=>`<tr><td>${r.date} ${r.hour}</td><td>${esc(r.client)}</td><td>${esc(r.court)}</td><td>${esc(r.status)}</td><td>${money(r.price)}</td><td>${money(r.deposit)}</td></tr>`).join("")}</table>`:`<div class="empty">Sin movimientos.</div>`}</div>`}
+function config(){const s=db.settings;document.querySelector("#app").innerHTML=`<div class="card"><h2>Configuración</h2><div class="grid"><div><label>Precio general</label><input id="cp" type="number" min="0" value="${s.price}"></div><div><label>Seña sugerida</label><input id="cd" type="number" min="0" value="${s.deposit}"></div></div><div style="margin-top:10px"><label>Canchas (una por línea)</label><textarea id="cc" rows="3">${esc(s.courts.join("\n"))}</textarea></div><div style="margin-top:10px"><label>Horarios (uno por línea)</label><textarea id="ch" rows="6">${esc(s.hours.join("\n"))}</textarea></div><button class="green" style="margin-top:10px" onclick="saveCfg()">Guardar configuración</button></div><div class="card"><h3>Respaldo de datos</h3><p style="font-size:13px;color:#6b7280">Los datos se guardan en este dispositivo. Si borrás los datos del navegador, podés perderlos. Hacé una copia periódica.</p><div class="row"><button class="blue" onclick="exportData()">⬇️ Exportar respaldo</button><button class="secondary" onclick="document.querySelector('#importFile').click()">⬆️ Importar respaldo</button></div><input id="importFile" type="file" accept="application/json" style="display:none" onchange="importData(this.files[0])"></div><div class="card"><b>Privacidad</b><p>Esta versión funciona localmente: las reservas, clientes y configuraciones quedan en el almacenamiento del navegador de este dispositivo.</p></div>`}
+function saveCfg(){const courts=cc.value.split("\n").map(x=>x.trim()).filter(Boolean),hours=ch.value.split("\n").map(x=>x.trim()).filter(Boolean);if(!courts.length||!hours.length)return alert("Debe existir al menos una cancha y un horario.");const uniq=[...new Set(hours)];if(uniq.some(h=>!/^(?:[01]\d|2[0-3]):00$/.test(h)))return alert("Los horarios deben tener formato HH:00.");db.settings.price=Math.max(0,+cp.value||0);db.settings.deposit=Math.max(0,+cd.value||0);db.settings.courts=[...new Set(courts)];db.settings.hours=uniq;save();alert("Configuración guardada.");render()}
+function exportData(){const blob=new Blob([JSON.stringify(db,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`costa-norte-sport-respaldo-${today()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function importData(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const x=JSON.parse(reader.result);if(!x.settings||!Array.isArray(x.reservations)||!Array.isArray(x.fixed)||!Array.isArray(x.clients))throw new Error();if(!confirm("Esto reemplazará los datos actuales de la aplicación. ¿Continuar?"))return;db=x;db.blocks=Array.isArray(db.blocks)?db.blocks:[];normalizeDB(db);save();render();alert("Respaldo importado correctamente.")}catch(e){alert("El archivo no es un respaldo válido de Costa Norte Sport.")}};reader.readAsText(file)}
 render();
