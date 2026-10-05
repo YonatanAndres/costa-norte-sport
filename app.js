@@ -1,3 +1,4 @@
+// Actualizacion Costa Norte Sport
 const KEY="costa_norte_sport_v3";
 const defaults={settings:{price:40000,deposit:12000,courts:["Cancha 1","Cancha 2"],hours:["18:00","19:00","20:00","21:00","22:00"]},reservations:[],fixed:[],clients:[],blocks:[]};
 let db=loadDB(),page="agenda",selectedDate=today(),clientSearch="";
